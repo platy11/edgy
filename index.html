@@ -1,17 +1,91 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <script type="text/javascript">
-    if (window.location) {
-      window.location = 'snap.html' + window.location.hash;
-    }
-    </script> 
-    <meta HTTP-EQUIV="REFRESH" content="0.1; url=snap.html">
-    <title>Redirecting to Snap!</title> 
-  </head>
-  <body>
-    <p>If you are not automatically redirected to Snap<i>!</i>,
-      <a href="snap.html">please click here.</a> </p> 
-  </body> 
-</html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+		<title>Edgy: Graph Algorithms</title>
+        <link rel="shortcut icon" href="k5_logo.png">
+		<script type="text/javascript" src="edgy/es6-shim.js"></script>
+		<script type="text/javascript" src="edgy/d3.v3.min.js"></script>
+		<script type="text/javascript" src="edgy/cola.v3.min.js"></script>
+		<script type="text/javascript" src="edgy/jsnetworkx.js"></script>
+		<script type="text/javascript" src="edgy/uuid.js"></script>
+		<script type="text/javascript" src="src/morphic.js"></script>
+		<script type="text/javascript" src="src/widgets.js"></script>
+		<script type="text/javascript" src="src/blocks.js"></script>
+		<script type="text/javascript" src="src/threads.js"></script>
+		<script type="text/javascript" src="src/objects.js"></script>
+		<script type="text/javascript" src="src/gui.js"></script>
+		<script type="text/javascript" src="src/paint.js"></script>
+		<script type="text/javascript" src="src/lists.js"></script>
+		<script type="text/javascript" src="edgy/bheap.js"></script>
+		<script type="text/javascript" src="src/byob.js"></script>
+		<script type="text/javascript" src="src/tables.js"></script>
+		<script type="text/javascript" src="src/symbols.js"></script>
+		<script type="text/javascript" src="src/sketch.js"></script>
+		<script type="text/javascript" src="src/video.js"></script>
+		<script type="text/javascript" src="src/maps.js"></script>
+		<script type="text/javascript" src="src/extensions.js"></script>
+		<script type="text/javascript" src="src/xml.js"></script>
+		<script type="text/javascript" src="src/store.js"></script>
+		<script type="text/javascript" src="src/locale.js"></script>
+		<script type="text/javascript" src="src/cloud.js"></script>
+		<script type="text/javascript" src="src/api.js"></script>
+		<script type="text/javascript" src="src/sha512.js"></script>
+	</head>
+	<body style="margin: 0;">
+		<canvas id="world" tabindex="1" style="position: absolute;"></canvas>
+		<script type="text/javascript" src="edgy/changesToBlocks.js"></script>
+		<script type="text/javascript" src="edgy/changesToThreads.js"></script>
+		<script type="text/javascript" src="edgy/changesToObjects.js"></script>
+		<script type="text/javascript" src="edgy/changesToStore.js"></script>
+		<script type="text/javascript" src="edgy/changesToGui.js"></script>
+		<script type="text/javascript" src="edgy/changesToByob.js"></script>
+		<script type="text/javascript" src="edgy/collections.js"></script>
+		<script type="text/javascript" src="edgy/operators.js"></script>
+		<script type="text/javascript" src="edgy/variables.js"></script>
+		<script type="text/javascript" src="edgy/dotparser.js"></script>
+		<script type="text/javascript" src="edgy/dotgraph.js"></script>
+		<script type="text/javascript" src="edgy/jsonp.js"></script>
+		<script type="text/javascript" src="edgy/jszip.js"></script>
+		<script type="text/javascript" src="edgy/ucsv-1.1.0.js"></script>
+		<script type="text/javascript" src="edgy/Blob.js"></script>
+		<script type="text/javascript" src="src/FileSaver.min.js"></script>
+		<script type="text/javascript" src="edgy/changesToMorphic.js"></script>
+		<script type="text/javascript" src="edgy/resigclass.js"></script>
+		<script type="text/javascript" src="edgy/debuglog.js"></script>
+		<script type="text/javascript">
+			var clickstream = new ClickstreamLogger(JSON.parse(localStorage['-snap-clickstream'] || "{}"));
+			var world = new WorldMorph(document.getElementById('world'));
+			var ide_ = new IDE_Morph();
+			
+			window.onerror = function(errorMessage, url, lineNumber) {
+			    ide_.parentThatIsA(IDE_Morph).showMessage(errorMessage);
+			}
+			
+			clickstream.log("sessionstart");
+		</script>
+		<script type="text/javascript" id="replace-me-pre">
+		</script>
+		<script type="text/javascript">
+			ide_.openIn(world);
+		</script>
+		<script type="text/javascript" id="replace-me-post">
+		</script>
+		<script type="text/javascript">
+			function loop() {
+				world.doOneCycle();
+                window.requestAnimationFrame(loop);
+			}
+            loop();
 
+			window.onInteractiveLoad = function() {
+				window.onbeforeunload = function() { };
+				var project = getInteractiveParameter('project');
+				if (project !== undefined) {
+					ide_.rawOpenProjectString(project);
+					ide_.toggleAppMode(true);
+				}
+			}
+		</script>
+    </body>
+</html>
