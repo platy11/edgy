@@ -7,7 +7,7 @@
     written by Jens Mönig and Brian Harvey
     jens@moenig.org, bh@cs.berkeley.edu
 
-    Copyright (C) 2018 by Jens Mönig and Brian Harvey
+    Copyright (C) 2021 by Jens Mönig and Brian Harvey
 
     This file is part of Snap!.
 
@@ -57,12 +57,13 @@
 // Global settings /////////////////////////////////////////////////////
 
 /*global modules, BoxMorph, HandleMorph, PushButtonMorph, SyntaxElementMorph,
-Color, Point, WatcherMorph, StringMorph, SpriteMorph, ScrollFrameMorph,
-CellMorph, ArrowMorph, MenuMorph, snapEquals, Morph, isNil, localize,
+Color, Point, WatcherMorph, StringMorph, SpriteMorph, ScrollFrameMorph, isNil,
+CellMorph, ArrowMorph, MenuMorph, snapEquals, localize, isString, IDE_Morph,
 MorphicPreferences, TableDialogMorph, SpriteBubbleMorph, SpeechBubbleMorph,
-TableFrameMorph, TableMorph, Variable, isSnapObject*/
+TableFrameMorph, TableMorph, Variable, isSnapObject, Costume, contains, detect,
+ZERO, WHITE*/
 
-modules.lists = '2018-March-08';
+modules.lists = '2021-March-15';
 
 var List;
 var ListWatcherMorph;
@@ -80,26 +81,52 @@ var ListWatcherMorph;
 
     setters (linked):
     -----------------
-    cons                - answer a new list with the given item in front
-    cdr                    - answer all but the first element
+    cons                    - answer a new list with the given item in front
+    cdr                     - answer all but the first element
 
     setters (arrayed):
     ------------------
-    add(element, index)    - insert the element before the given slot,
-    put(element, index)    - overwrite the element at the given slot
-    remove(index)        - remove the given slot, shortening the list
-    clear()                - remove all elements
+    add(element, index)     - insert the element before the given slot,
+    put(element, index)     - overwrite the element at the given slot
+    remove(index)           - remove the given slot, shortening the list
+    clear()                 - remove all elements
 
     getters (all hybrid):
     ---------------------
-    length()            - number of slots
-    at(index)            - element present in specified slot
-    contains(element)    - <bool>
+    length()                - number of slots
+    at(index)               - element present in specified slot
+    contains(element)       - <bool>
+    isEmpty()               - <bool>
+    indexOf(element)        - index of element's first occurrence, 0 if none
 
     conversion:
     -----------
-    asArray()            - answer me as JavaScript array
-    asText()            - answer my elements (recursively) concatenated
+    asArray()               - answer me as JavaScript array, convert to arrayed
+    itemsArray()            - answer a JavaScript array shallow copy of myself
+    asText()                - answer my elements (recursively) concatenated
+    asCSV()                 - answer a csv-formatted String of myself
+    asJSON()                - answer a json-formatted String of myself
+
+    utility:
+    ---------
+    map(callback)           - answer an arrayed copy applying a JS func to all
+    deepMap(callback)       - same as map for all atomic elements
+
+    matrix ops (arrayed)
+    --------------------
+    size()                  - count the number of all atomic elements
+    rank()                  - answer the number of my dimensions
+    shape()                 - answer a list of the max size for each dimension
+    width()                 - ansswer the maximum length of my columns, if any
+    flatten()               - answer a concatenated list of columns and atoms
+    ravel()                 - answer a flat list of all atoms in all sublists
+    columns()               - answer a 2D list with rows turned into columns
+    transpose()             - answer the matrix transpose over all dimensions
+    reversed()              - answer a reversed shallow copy of the list
+    reshape()               - answer a new list formatted to the given dimensions.
+    crossproduct()          - answer a new list of all possible sublist tuples
+    query()                 - answer a part of a list or multidimensionel struct
+    slice()                 - same as query() turning negative indices into slices
 */
 
 // List instance creation:
@@ -115,7 +142,7 @@ function List(array) {
 
 // List global preferences
 
-List.prototype.enableTables = false; // default, to not confuse NYC teachers
+List.prototype.enableTables = true;
 
 // List printing
 
@@ -165,7 +192,7 @@ List.prototype.add = function (element, index) {
     insert the element before the given slot index,
     if no index is specifed, append the element
 */
-    var idx = index || this.length() + 1,
+    var idx = Math.round(+index) || this.length() + 1,
         obj = isNil(element) ? null : element;
 
     this.becomeArray();
@@ -175,19 +202,23 @@ List.prototype.add = function (element, index) {
 
 List.prototype.put = function (element, index) {
     // exchange the element at the given slot for another
-    var data = element === 0 ? 0
+    var idx = Math.round(+index) || 0,
+        data = element === 0 ? 0
             : element === false ? false
                     : element || null;
 
     this.becomeArray();
-    this.contents[index - 1] = data;
+    if (idx < 1 || idx > this.contents.length) {
+        return;
+    }
+    this.contents[idx - 1] = data;
     this.changed();
 };
 
 List.prototype.remove = function (index) {
     // remove the given slot, shortening the list
     this.becomeArray();
-    this.contents.splice(index - 1, 1);
+    this.contents.splice(Math.round(+index || 0) - 1, 1);
     this.changed();
 };
 
@@ -197,6 +228,20 @@ List.prototype.clear = function () {
     this.rest = null;
     this.isLinked = false;
     this.changed();
+};
+
+// List utilities
+
+List.prototype.map = function (callback) {
+    return new List(
+        this.itemsArray().map(callback)
+    );
+};
+
+List.prototype.deepMap = function (callback) {
+    return this.map(item => item instanceof List ?
+        item.deepMap(callback)
+            : callback(item));
 };
 
 // List getters (all hybrid):
@@ -215,7 +260,9 @@ List.prototype.length = function () {
 };
 
 List.prototype.at = function (index) {
-    var value, idx = +index, pair = this;
+    var value,
+        idx = Math.round(+index || 0),
+        pair = this;
     while (pair.isLinked) {
         if (idx > 1) {
             pair = pair.rest;
@@ -237,9 +284,35 @@ List.prototype.contains = function (element) {
         pair = pair.rest;
     }
     // in case I'm arrayed
-    return pair.contents.some(function (any) {
-        return snapEquals(any, element);
-    });
+    return pair.contents.some(any => snapEquals(any, element));
+};
+
+List.prototype.isEmpty = function () {
+    if (this.isLinked) {
+        return isNil(this.first);
+    }
+    return !this.contents.length;
+};
+
+List.prototype.indexOf = function (element) {
+    var pair = this,
+        idx = 1,
+        i, len;
+    while (pair.isLinked) {
+        if (snapEquals(pair.first, element)) {
+            return idx;
+        }
+        pair = pair.rest;
+        idx += 1;
+    }
+    // in case I'm arrayed
+    len = pair.contents.length;
+    for (i = 0; i < len; i += 1) {
+        if (snapEquals(pair.contents[i], element)) {
+            return idx + i;
+        }
+    }
+    return 0;
 };
 
 // List table (2D) accessing (for table morph widget):
@@ -284,8 +357,18 @@ List.prototype.rows = function () {
 };
 
 List.prototype.cols = function () {
-    var r = (this.at(1));
-    return r instanceof List ? r.length() : 1;
+    // scan the first 10 rows for the maximun width
+    var len = Math.min(10, this.length()),
+        count = 1,
+        r, i;
+
+    for (i = 1; i <= len; i += 1) {
+        r = this.at(i);
+        if (r instanceof List) {
+            count = Math.max(count, r.length());
+        }
+    }
+    return count;
 };
 
 List.prototype.colName = function (col) {
@@ -303,16 +386,444 @@ List.prototype.columnNames = function () {
     return [];
 };
 
-List.prototype.version = function (startRow, rows) {
+List.prototype.version = function (startRow, rows, startCol, cols) {
     var l = Math.min(startRow + rows, this.length()),
         v = this.lastChanged,
         r,
         i;
     for (i = startRow; i <= l; i += 1) {
         r = this.at(i);
-        v = Math.max(v, r.lastChanged ? r.lastChanged : 0);
+        if (r instanceof Costume) {
+            v = Math.max(v, r.version);
+        } else if (r instanceof List) {
+            v = Math.max(v, r.version(startCol, cols));
+        } else {
+            v = Math.max(v, r.lastChanged ? r.lastChanged : 0);
+        }
     }
     return v;
+};
+
+// List matrix operations and utilities - very experimental
+
+List.prototype.query = function (indices) {
+    // assumes a 2D argument list where each slot represents
+    // the indices to select from a dimension
+    // e.g. [rows, columns, planes]
+    var first, select;
+    if (indices.isEmpty()) {
+        return this.map(e => e);
+    }
+    if (indices.rank() === 1) {
+        return indices.map(i => this.at(i));
+    }
+    first = indices.at(1);
+    if (first instanceof List) {
+        select = first.isEmpty() ?
+            this.range(1, this.length())
+                : first;
+    } else {
+        select = new List([first]);
+    }
+    return select.map(i => this.at(i)).map(
+            e => e instanceof List? e.query(indices.cdr()) : e
+    );
+};
+
+List.prototype.slice = function (indices) {
+    // EXPERIMENTAL - NOT IN USE.
+    // assumes a 2D argument list where each slot represents
+    // the indices to select from a dimension
+    // e.g. [rows, columns, planes]
+    //
+    // slicing spec:
+    // positive integers represent single indices,
+    // negative integes and zero represent slices starting at the
+    // index following the last specified positive integer up to / down to
+    // my length offset by the negative / zero integer
+    //
+    // Currently unused and NOT part of the ITEM OF primitivie in
+    // production Snap, because negative indices are used in exercises and
+    // curriculum activities relying on them returning zero / empty values
+    // rather than wrapped ones, e.g. when creating a "reverb" or "echo"
+    // effect from sound samples.
+    //
+    // to be revisited in the future, perhaps as seperate primitive.
+    // -Jens
+
+    var first, select;
+    if (indices.isEmpty()) {
+        return this.map(e => e);
+    }
+    if (indices.rank() === 1) {
+        return this.rangify(indices).map(i => this.at(i));
+    }
+    first = indices.at(1);
+    if (first instanceof List) {
+        select = first.isEmpty() ?
+            this.range(1, this.length())
+                : this.rangify(first);
+    } else {
+        select = this.rangify(new List([first]));
+    }
+    return select.map(i => this.at(i)).map(
+            e => e instanceof List? e.slice(indices.cdr()) : e
+    );
+};
+
+List.prototype.rangify = function (indices) {
+    // EXPERIMENTAL - NOT IN USE.
+    // private - answer a list of indices with zero and negative integers
+    // replaced by slices of consecutive indices ranging from the next
+    // index following the last specified single index up / down to
+    // my length offset by the negative / zero index.
+    var result = [],
+        len = this.length(),
+        current = 0,
+        start, end;
+    indices.itemsArray().forEach(idx => {
+        idx = +idx;
+        if (idx > 0) {
+            result.push(idx);
+            current = idx;
+        } else {
+            end = len + idx;
+            if (current !== end) {
+                start = current < end ? current + 1 : current - 1;
+                this.range(start, end).itemsArray().forEach(
+                    num => result.push(num)
+                );
+            }
+        }
+    });
+    return new List(result);
+};
+
+List.prototype.range = function (start, end) {
+    // private - answer a list of integers from start to the given end
+    return new List([...Array(Math.abs(end - start) + 1)].map((e, i) =>
+        start < end ? start + i : start - i
+    ));
+};
+
+List.prototype.items = function (indices) {
+    // deprecated. Same as query() above, except in reverse order.
+    // e.g. [planes, columns, rows]
+
+    // This. This is it. The pinnacle of my programmer's life.
+    // After days of roaming about my house and garden,
+    // of taking showers and rummaging through the fridge,
+    // of strumming the charango and the five ukuleles
+    // sitting next to my laptop on my desk,
+    // and of letting my mind wander far and wide,
+    // to come up with this design, always thinking
+    // "What would Brian do?".
+    // And look, Ma, it's turned out all beautiful! -jens
+
+    return makeSelector(
+        this.rank(),
+        indices.cdr(),
+        makeLeafSelector(indices.at(1))
+    )(this);
+
+    function makeSelector(rank, indices, next) {
+        if (rank === 1) {
+            return next;
+        }
+        return makeSelector(
+            rank - 1,
+            indices.cdr(),
+            makeBranch(
+                indices.at(1) || new List(),
+                next
+            )
+        );
+    }
+
+    function makeBranch(indices, next) {
+        return function(data) {
+            if (indices.isEmpty()) {
+                return data.map(item => next(item));
+            }
+            return indices.map(idx => next(data.at(idx)));
+        };
+    }
+
+    function makeLeafSelector(indices) {
+        return function (data) {
+            if (indices.isEmpty()) {
+                return data.map(item => item);
+            }
+            return indices.map(idx => data.at(idx));
+        };
+    }
+};
+
+List.prototype.size = function () {
+    // count the number of all atomic elements
+    var count = 0;
+    this.deepMap(() => count += 1);
+    return count;
+};
+
+List.prototype.ravel = function () {
+    // answer a flat list containing all atomic elements in all sublists
+    var all = [];
+    this.deepMap(atom => all.push(atom));
+    return new List(all);
+};
+
+List.prototype.rank = function () {
+    // answer the number of my dimensions
+    // traverse the whole structure for irregularly shaped nested lists
+    var rank = 1,
+        len = this.length(),
+        item, i;
+
+    for (i = 1; i <= len; i += 1) {
+        item = this.at(i);
+        if (item instanceof List) {
+            rank = Math.max(rank, 1 + item.rank());
+        }
+    }
+    return rank;
+};
+
+List.prototype.shape = function () {
+    // answer a list of the maximum size for each dimension
+    var dim,
+        rank = this.rank(),
+        shp = new List([this.length()]),
+        max, items, i, len;
+    for (dim = 2; dim <= rank; dim += 1) {
+        max = 0;
+        items = this.getDimension(dim);
+        len = items.length();
+        for (i = 1; i <= len; i += 1) {
+            max = Math.max(max, items.at(i).length());
+        }
+        shp.add(max);
+    }
+    return shp;
+};
+
+List.prototype.getDimension = function (rank = 0) {
+    // private - answer a list of all elements of the specified rank
+    if (rank < 1) {return new List(); }
+    if (rank === 1) {
+        return this.map(item => item);
+    }
+    if (rank === 2) {
+        return new List(this.itemsArray().filter(item => item instanceof List));
+    }
+    return new List(
+        this.getDimension(rank - 1).flatten().itemsArray().filter(
+            value => value instanceof List
+        )
+    );
+};
+
+List.prototype.width = function () {
+    // private - answer the maximum length of my direct sub-lists (columns),
+    // if any
+    var i, item,
+        width = 0,
+        len = this.length();
+    for (i = 1; i <= len; i += 1) {
+        item = this.at(i);
+        width = Math.max(width, item instanceof List ? item.length() : 0);
+    }
+    return width;
+};
+
+List.prototype.flatten = function () {
+    // answer a new list that concatenates my direct sublists (columns)
+    // and atomic elements
+    var flat = [];
+    this.itemsArray().forEach(item => {
+        if (item instanceof List) {
+            item.itemsArray().forEach(value => flat.push(value));
+        } else {
+            flat.push(item);
+        }
+    });
+    return new List(flat);
+};
+
+List.prototype.transpose = function () {
+    if (this.rank() > 2) {
+        return this.strideTranspose();
+    }
+    return this.columns();
+};
+
+List.prototype.columns = function () {
+    // answer a 2D list where each item has turned into a row,
+    // convert atomic items into lists,
+    // fill ragged columns with atomic values, if any, or empty cells
+
+    var col, src, i,
+        width = Math.max(this.width(), 1),
+        table = [];
+
+    // convert atomic items into rows
+    src = this.map(row =>
+        row instanceof List ? row : new List(new Array(width).fill(row))
+    );
+
+    // define the mapper function
+    col = (tab, c) => tab.map(row => row.at(c));
+
+    // create the transform
+    for (i = 1; i <= width; i += 1) {
+        table.push(col(src, i));
+    }
+    return new List(table);
+};
+
+List.prototype.reshape = function (dimensions) {
+    // answer a new list formatted to fit the given dimensions.
+    // truncate excess elements, if any.
+    // pad with (repetitions of) existing elements
+    var src = this.ravel().itemsArray(),
+        size = dimensions.isEmpty() ? 0
+            : dimensions.itemsArray().reduce((a, b) => a * b),
+        i = 0,
+        trg;
+
+    // make sure the items count matches the specified target dimensions
+    if (size < src.length) {
+        // truncate excess elements from the source
+        trg = src.slice(0, size);
+    } else {
+        if (size > src.length && dimensions.length() > 2 && size > 1000000) {
+            // limit usage of reshape to grow to a maximum size of 1MM rows
+            // in higher dimensions to prevent accidental dimension overflow
+            throw new Error('exceeding the size limit for reshape');
+        }
+        // pad the source by repeating its existing elements
+        trg = src.slice();
+        while (trg.length < size) {
+            if (i >= src.length) {
+                i = 0;
+            }
+            trg.push(src[i]);
+            i += 1;
+        }
+    }
+
+    // fold the doctored source into the specified dimensions
+    return new List(trg).folded(dimensions);
+};
+
+List.prototype.folded = function (dimensions) {
+    // private
+    var len = dimensions.length(),
+        trg = this,
+        i;
+    if (len < 2) {
+        return this.map(e => e);
+    }
+    for (i = len; i > 1; i -= 1) {
+        trg = trg.asChunksOf(dimensions.at(i));
+    }
+    return trg;
+};
+
+List.prototype.asChunksOf = function (size) {
+    // private
+    var trg = new List(),
+        len = this.length(),
+        sub, i;
+    for (i = 0; i < len; i += 1) {
+        if (i % size === 0) {
+            sub = new List();
+            trg.add(sub);
+        }
+        sub.add(this.at(i + 1));
+    }
+    return trg;
+};
+
+List.prototype.crossproduct = function () {
+    // expects myself to be a list of lists.
+    // answers a new list of all possible tuples
+    // with one item from each of my sublists
+    var result = new List(),
+        len = this.length(),
+        lengths = this.map(each => each.length()),
+        size = lengths.itemsArray().reduce((a, b) => a * b),
+        i, k, row, factor;
+
+    // limit crossproduct to a maximum size of 1MM rows
+    // to guard against accidental memory overflows in Chrome
+    if (size > 1000000) {
+        throw new Error('exceeding the size limit for cross product');
+    }
+
+    for (i = 1; i <= size; i += 1) {
+        row = new List();
+        factor = 1;
+        for (k = 1; k <= len; k += 1) {
+            row.add(
+                this.at(k).at(
+                    ((Math.ceil(i / ((size / lengths.at(k)) * factor)) - 1) %
+                        lengths.at(k)) + 1
+                )
+            );
+            factor /= lengths.at(k);
+        }
+        result.add(row);
+    }
+    return result;
+};
+
+List.prototype.strideTranspose = function () {
+    // private - transpose a matric of rank > 2
+    // thanks, Brian!
+    var oldShape = this.shape(),
+        newShape = oldShape.reversed(),
+        oldSizes = new List([1]),
+        newSizes = new List([1]),
+        oldFlat = this.ravel(),
+        newFlat = new List(new Array(oldFlat.length())),
+        product = 1,
+        i;
+
+    function newIndex(old, os, ns) {
+        var foo;
+        if (os.isEmpty()) {
+            return 0;
+        }
+        foo = Math.floor(old / ns.at(1));
+        return foo * os.at(1) + newIndex(
+            old % ns.at(1),
+            os.cdr(),
+            ns.cdr()
+        );
+    }
+
+    for (i = oldShape.length(); i > 1; i -= 1) {
+        product *= oldShape.at(i);
+        newSizes.add(product, 1);
+    }
+    product = 1;
+    for (i = 1; i <= oldShape.length() - 1; i += 1) {
+        product *= oldShape.at(i);
+        oldSizes.add(product);
+    }
+    for (i = 1; i <= oldFlat.length(); i += 1) {
+        newFlat.put(
+            oldFlat.at(i),
+            newIndex(i-1, oldSizes, newSizes)+1
+        );
+    }
+    return newFlat.reshape(newShape);
+};
+
+List.prototype.reversed = function () {
+    // only for arrayed lists
+    return new List(this.itemsArray().slice().reverse());
 };
 
 // List conversion:
@@ -388,7 +899,7 @@ List.prototype.becomeLinked = function () {
         stop = this.length();
         for (i = 0; i < stop; i += 1) {
             tail.first = this.contents[i];
-            if (i < (stop - 1)) {
+            if (i < stop) {
                 tail.rest = new List();
                 tail.isLinked = true;
                 tail = tail.rest;
@@ -397,6 +908,101 @@ List.prototype.becomeLinked = function () {
         this.contents = [];
         this.isLinked = true;
     }
+};
+
+List.prototype.asCSV = function () {
+    // RFC 4180
+    // Caution, no error catching!
+    // this method assumes that the list.canBeCSV()
+
+    var items = this.itemsArray(),
+        rows = [];
+    
+    function encodeCell(atomicValue) {
+        var string = isNil(atomicValue) ? '' : atomicValue.toString(),
+            cell;
+        if (string.indexOf('\"') ===  -1 &&
+                (string.indexOf('\n') === -1) &&
+                (string.indexOf('\,') === -1)) {
+            return string;
+        }
+        cell = ['\"'];
+        string.split('').forEach(letter => {
+            cell.push(letter);
+            if (letter === '\"') {
+                cell.push(letter);
+            }
+        });
+        cell.push('\"');
+        return cell.join('');
+    }
+
+    if (items.some(any => any instanceof List)) {
+        // 2-dimensional table
+        items.forEach(item => {
+            if (item instanceof List) {
+                rows.push(item.itemsArray().map(encodeCell).join(','));
+            } else {
+                rows.push(encodeCell(item));
+            }
+        });
+        return rows.join('\n');
+    }
+    // single row
+    return items.map(encodeCell).join(',');
+};
+
+List.prototype.asJSON = function (guessObjects) {
+    // Caution, no error catching!
+    // this method assumes that the list.canBeJSON()
+
+    function objectify(list, guessObjects) {
+        var items = list.itemsArray(),
+            obj = {};
+        if (canBeObject(items)) {
+            items.forEach(pair => {
+                var value = pair.length() === 2 ? pair.at(2) : undefined;
+                obj[pair.at(1)] = (value instanceof List ?
+                    objectify(value, guessObjects) : value);
+            });
+            return obj;
+        }
+        return items.map(element => {
+            return element instanceof List ?
+                objectify(element, guessObjects) : element;
+        });
+    }
+
+    function canBeObject(array) {
+        // try to determine whether the contents of a list
+        // might be better represented as dictionary/object
+        // than as array
+        var keys;
+        if (array.every(
+            element => element instanceof List && (element.length() < 3)
+        )) {
+            keys = array.map(each => each.at(1));
+            return keys.every(each => isString(each) && isUniqueIn(each, keys));
+        }
+    }
+
+    function isUniqueIn(element, array) {
+        return array.indexOf(element) === array.lastIndexOf(element);
+    }
+
+    return JSON.stringify(objectify(this, guessObjects));
+};
+
+List.prototype.canBeTXT = function () {
+    return this.itemsArray().every(item =>
+        isString(item) || (typeof item === 'number')
+    );
+};
+
+List.prototype.asTXT = function () {
+    // Caution, no error catching!
+    // this method assumes that the list.canBeJSON()
+    return this.itemsArray().join('\n');
 };
 
 // List testing
@@ -447,6 +1053,69 @@ List.prototype.equalTo = function (other) {
     return true;
 };
 
+List.prototype.canBeCSV = function () {
+    return this.itemsArray().every(value => {
+        return (!isNaN(+value) && typeof value !== 'boolean') ||
+            isString(value) ||
+            (value instanceof List && value.hasOnlyAtomicData());
+    });
+};
+
+List.prototype.canBeJSON = function () {
+    return this.itemsArray().every(value => {
+        return !isNaN(+value) ||
+            isString(value) ||
+            value === true ||
+            value === false ||
+            (value instanceof List && value.canBeJSON());
+    });
+};
+
+List.prototype.hasOnlyAtomicData = function () {
+    return this.itemsArray().every(value => {
+        return (!isNaN(+value) && typeof value !== 'boolean') ||
+            isString(value);
+    });
+};
+
+// List-to-block (experimental)
+
+List.prototype.blockify = function (limit = 500, count = [0]) {
+    var block = SpriteMorph.prototype.blockForSelector('reportNewList'),
+        slots = block.inputs()[0],
+        len = this.length(),
+        bool,
+        i, value;
+
+    block.isDraggable = true;
+    slots.removeInput();
+    
+    // fill the slots with the data
+    for (i = 0; i < len && count[0] < limit; i += 1) {
+        value = this.at(i + 1);
+        if (value instanceof List) {
+            slots.replaceInput(
+                slots.addInput(),
+                value.blockify(limit, count)
+            );
+        } else if (typeof value === 'boolean') {
+            bool = SpriteMorph.prototype.blockForSelector('reportBoolean');
+            bool.inputs()[0].setContents(value);
+            bool.isDraggable = true;
+            slots.replaceInput(
+                slots.addInput(),
+                bool
+            );
+        } else {
+            slots.addInput(value);
+        }
+        count[0] += 1;
+    }
+
+    slots.fixBlockColor(null, true);
+    return block;
+};
+
 // ListWatcherMorph ////////////////////////////////////////////////////
 
 /*
@@ -472,12 +1141,13 @@ function ListWatcherMorph(list, parentCell) {
 }
 
 ListWatcherMorph.prototype.init = function (list, parentCell) {
-    var myself = this;
+    var myself = this,
+        readOnly;
 
     this.list = list || new List();
     this.start = 1;
     this.range = 100;
-    this.lastUpdated = Date.now();
+    this.lastUpdated = 0;
     this.lastCell = null;
     this.parentCell = parentCell || null; // for circularity detection
 
@@ -489,8 +1159,8 @@ ListWatcherMorph.prototype.init = function (list, parentCell) {
         false,
         false,
         false,
-        MorphicPreferences.isFlat ? new Point() : new Point(1, 1),
-        new Color(255, 255, 255)
+        MorphicPreferences.isFlat ? ZERO : new Point(1, 1),
+        WHITE
     );
     this.label.mouseClickLeft = function () {myself.startIndexMenu(); };
 
@@ -518,21 +1188,25 @@ ListWatcherMorph.prototype.init = function (list, parentCell) {
     this.arrow.setBottom(this.handle.top());
     this.handle.add(this.arrow);
 
-    this.plusButton = new PushButtonMorph(
-        this.list,
-        'add',
-        '+'
-    );
-    this.plusButton.padding = 0;
-    this.plusButton.edge = 0;
-    this.plusButton.outlineColor = this.color;
-    this.plusButton.drawNew();
-    this.plusButton.fixLayout();
+    readOnly = this.list.type && !contains(['text', 'number'], this.list.type);
+    if (readOnly) {
+        this.plusButton = null;
+    } else {
+        this.plusButton = new PushButtonMorph(
+            this.list,
+            'add',
+            '+'
+        );
+        this.plusButton.padding = 0;
+        this.plusButton.edge = 0;
+        this.plusButton.outlineColor = this.color;
+        this.plusButton.fixLayout();
+    }
 
     ListWatcherMorph.uber.init.call(
         this,
         SyntaxElementMorph.prototype.rounding,
-        1.000001, // shadow bug in Chrome,
+        1,
         new Color(120, 120, 120)
     );
 
@@ -543,9 +1217,11 @@ ListWatcherMorph.prototype.init = function (list, parentCell) {
     ));
     this.add(this.label);
     this.add(this.frame);
-    this.add(this.plusButton);
+    if (!readOnly) {
+        this.add(this.plusButton);
+    }
     this.add(this.handle);
-    this.handle.drawNew();
+    this.handle.fixLayout();
     this.update();
     this.fixLayout();
 };
@@ -555,12 +1231,12 @@ ListWatcherMorph.prototype.init = function (list, parentCell) {
 ListWatcherMorph.prototype.update = function (anyway) {
     var i, idx, ceil, morphs, cell, cnts, label, button, max,
         starttime, maxtime = 1000;
-
-    this.frame.contents.children.forEach(function (m) {
+    this.frame.contents.children.forEach(m => {
         if (m instanceof CellMorph) {
             if (m.contentsMorph instanceof ListWatcherMorph) {
                 m.contentsMorph.update();
-            } else if (isSnapObject(m.contents)) {
+            } else if (isSnapObject(m.contents) ||
+                    (m.contents instanceof Costume)) {
                 m.update();
             }
         }
@@ -569,7 +1245,6 @@ ListWatcherMorph.prototype.update = function (anyway) {
     if (this.lastUpdated === this.list.lastChanged && !anyway) {
         return null;
     }
-
     this.updateLength(true);
 
     // adjust start index to current list length
@@ -605,7 +1280,7 @@ ListWatcherMorph.prototype.update = function (anyway) {
 
         if (cell.contents !== cnts) {
             cell.contents = cnts;
-            cell.drawNew();
+            cell.fixLayout();
             if (this.lastCell) {
                 cell.setLeft(this.lastCell.left());
             }
@@ -614,7 +1289,7 @@ ListWatcherMorph.prototype.update = function (anyway) {
 
         if (label.text !== idx.toString()) {
             label.text = idx.toString();
-            label.drawNew();
+            label.fixLayout();
         }
 
         button.action = idx;
@@ -649,8 +1324,8 @@ ListWatcherMorph.prototype.update = function (anyway) {
                 false,
                 false,
                 false,
-                MorphicPreferences.isFlat ? new Point() : new Point(1, 1),
-                new Color(255, 255, 255)
+                MorphicPreferences.isFlat ? ZERO : new Point(1, 1),
+                WHITE
             );
             cell = new CellMorph(
                 this.list.at(idx),
@@ -668,7 +1343,6 @@ ListWatcherMorph.prototype.update = function (anyway) {
             button.edge = 0;
             button.corner = 1;
             button.outlineColor = this.color.darker();
-            button.drawNew();
             button.fixLayout();
 
             this.frame.contents.add(cell);
@@ -700,7 +1374,7 @@ ListWatcherMorph.prototype.updateLength = function (notDone) {
     } else {
         this.label.color = new Color(0, 0, 0);
     }
-    this.label.drawNew();
+    this.label.fixLayout();
     this.label.setCenter(this.center());
     this.label.setBottom(this.bottom() - 3);
 };
@@ -708,12 +1382,11 @@ ListWatcherMorph.prototype.updateLength = function (notDone) {
 ListWatcherMorph.prototype.startIndexMenu = function () {
     var i,
         range,
-        myself = this,
         items = Math.ceil(this.list.length() / this.range),
         menu = new MenuMorph(
-            function (idx) {myself.setStartIndex(idx); },
+            idx => this.setStartIndex(idx),
             null,
-            myself
+            this
         );
     menu.addItem('1...', 1);
     for (i = 1; i < items; i += 1) {
@@ -726,32 +1399,33 @@ ListWatcherMorph.prototype.startIndexMenu = function () {
 ListWatcherMorph.prototype.setStartIndex = function (index) {
     this.start = index;
     this.list.changed();
+    this.update();
 };
 
 ListWatcherMorph.prototype.fixLayout = function () {
     if (!this.label) {return; }
-    Morph.prototype.trackChanges = false;
     if (this.frame) {
         this.arrangeCells();
-        this.frame.silentSetPosition(this.position().add(3));
+        this.frame.setPosition(this.position().add(3));
         this.frame.bounds.corner = this.bounds.corner.subtract(new Point(
             3,
             17
         ));
-        this.frame.drawNew();
+        this.frame.fixLayout();
         this.frame.contents.adjustBounds();
     }
 
     this.label.setCenter(this.center());
     this.label.setBottom(this.bottom() - 3);
-    this.plusButton.setLeft(this.left() + 3);
-    this.plusButton.setBottom(this.bottom() - 3);
+    if (this.plusButton) {
+        this.plusButton.setLeft(this.left() + 3);
+        this.plusButton.setBottom(this.bottom() - 3);
+    }
 
-    Morph.prototype.trackChanges = true;
-    this.changed();
-
-    if (this.parent && this.parent.fixLayout) {
+    if (this.parent) {
+        this.parent.changed();
         this.parent.fixLayout();
+        this.parent.rerender();
     }
 };
 
@@ -796,38 +1470,55 @@ ListWatcherMorph.prototype.userMenu = function () {
     if (!List.prototype.enableTables) {
         return this.escalateEvent('userMenu');
     }
-    var menu = new MenuMorph(this),
-        myself = this;
+    var menu = new MenuMorph(this);
     menu.addItem('table view...', 'showTableView');
+    if (this.list.canBeJSON()) {
+        menu.addItem(
+            'blockify',
+            () => {
+                var world = this.world(),
+                    ide = detect(world.children, m => m instanceof IDE_Morph);
+                this.list.blockify().pickUp(world);
+                world.hand.grabOrigin = {
+                    origin: ide.palette,
+                    position: ide.palette.center()
+                };
+            }
+        );
+    }
     menu.addLine();
     menu.addItem(
         'open in dialog...',
-        function () {
-            new TableDialogMorph(myself.list).popUp(myself.world());
-        }
+        () => new TableDialogMorph(this.list).popUp(this.world())
     );
     return menu;
 };
 
 ListWatcherMorph.prototype.showTableView = function () {
-    var view = this.parentThatIsAnyOf([
+    var view = this.parentThatIsA(
         SpriteBubbleMorph,
         SpeechBubbleMorph,
         CellMorph
-    ]);
+    );
     if (!view) {return; }
     if (view instanceof SpriteBubbleMorph) {
-        view.changed();
-        view.drawNew(true);
+        view.contentsMorph.destroy();
+        view.contentsMorph = new TableFrameMorph(new TableMorph(this.list, 10));
+        view.contentsMorph.expand(this.extent());
+        view.parent.positionTalkBubble();
     } else if (view instanceof SpeechBubbleMorph) {
         view.contents = new TableFrameMorph(new TableMorph(this.list, 10));
         view.contents.expand(this.extent());
-        view.drawNew(true);
     } else { // watcher cell
-        view.drawNew(true, 'table');
+        view.changed();
+        view.contentsMorph.destroy();
+        view.contentsMorph = new TableFrameMorph(new TableMorph(this.list, 10));
+        view.add(view.contentsMorph);
+        view.contentsMorph.setPosition(this.position());
         view.contentsMorph.expand(this.extent());
     }
     view.fixLayout();
+    view.rerender();
 };
 
 // ListWatcherMorph events:
@@ -847,9 +1538,6 @@ ListWatcherMorph.prototype.show = function () {
     this.frame.contents.adjustBounds();
 };
 
-// ListWatcherMorph drawing:
+// ListWatcherMorph rendering:
 
-ListWatcherMorph.prototype.drawNew = function () {
-    WatcherMorph.prototype.drawNew.call(this);
-    this.fixLayout();
-};
+ListWatcherMorph.prototype.render = WatcherMorph.prototype.render;
